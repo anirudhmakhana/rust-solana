@@ -834,3 +834,340 @@ Key ideas:
 - The generic version would be `fn largest<T: PartialOrd>(list: &[T]) -> T` — `T: PartialOrd` is the trait bound that allows `>`
 - Trait bounds (`T: Trait`) constrain generics to types that implement specific behaviour — the compiler verifies this
 - `i32` is `Copy`, so `max = n` copies the value; for non-`Copy` types (like `String`) you'd need references
+
+---
+
+### P27 — Traits (`src/traits.rs`)
+
+Define a trait and implement it for a struct.
+
+```rust
+trait Describable {
+    fn describe(&self) -> String;
+}
+
+struct Item { name: String, price: i32 }
+
+impl Describable for Item {
+    fn describe(&self) -> String {
+        format!("{}: {} cents", self.name, self.price)
+    }
+}
+```
+
+Key ideas:
+- `trait Trait { fn method(&self) -> ReturnType; }` — declares the interface; no implementation body
+- `impl Trait for Type { ... }` — provides the concrete implementation for that type
+- Any number of types can implement the same trait; any type can implement many traits
+- Trait bounds in functions: `fn print_desc(item: &impl Describable)` or `fn print_desc<T: Describable>(item: &T)`
+- Built-in traits you'll use constantly: `Display` (for `{}`), `Debug` (for `{:?}`), `Clone`, `Copy`, `Iterator`
+- Traits are how Rust achieves polymorphism without inheritance
+
+---
+
+### P28 — Derive (`src/derive.rs`)
+
+Auto-implement traits with `#[derive]` and use them in functions.
+
+```rust
+#[derive(Debug, Clone, PartialEq)]
+struct Point { x: i32, y: i32 }
+
+fn are_equal(a: &Point, b: &Point) -> bool { a == b }
+
+fn distance_sq(a: &Point, b: &Point) -> i32 {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    dx * dx + dy * dy
+}
+```
+
+Key ideas:
+- `#[derive(...)]` is a **proc macro attribute** that generates trait implementations automatically
+- `PartialEq` enables `==` and `!=` — without it, comparing two `Point`s is a compile error
+- `Clone` enables `.clone()` — explicit deep copy; `Copy` (for stack-only types like `i32`) makes copies implicit
+- `Debug` enables `{:?}` formatting — essential for printing structs during development
+- Squared distance avoids `f64` and `sqrt` — useful when you only need to compare distances, not the actual value
+- Common derivable traits: `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`, `Hash`, `Default`, `PartialOrd`, `Ord`
+
+---
+
+### P29 — Associated types (`src/assoc_types.rs`)
+
+Define a trait with an associated type, implemented differently for two structs.
+
+```rust
+trait Summarize {
+    type Output;
+    fn summarize(&self) -> Self::Output;
+}
+
+impl Summarize for Numbers {
+    type Output = i32;
+    fn summarize(&self) -> i32 { self.data.iter().sum() }
+}
+
+impl Summarize for Sentence {
+    type Output = String;
+    fn summarize(&self) -> String { self.words.join(" ") }
+}
+```
+
+Key ideas:
+- `type Output;` inside a trait declares an **associated type** — a placeholder resolved per implementation
+- `Self::Output` refers to whatever type the implementor sets `Output` to
+- Each type can only implement the trait once (vs a generic `<T>` which could be implemented for `T=i32`, `T=String`, etc.)
+- No need to write `Summarize<i32>` at call sites — the output type is inferred from the concrete type
+- `.iter().sum()` works because `i32` implements the `Sum` trait — the compiler infers the sum type
+- `.join(" ")` on `Vec<String>` produces a single `String` with the separator inserted between elements
+- The `Iterator` trait itself uses this pattern: `type Item` is the associated type
+
+---
+
+### P30 — Lifetimes & `'static` (`src/lifetimes.rs`)
+
+Return a `&'static str` from a function using string literals.
+
+```rust
+fn classify(n: i32) -> &'static str {
+    if n > 0 { "positive" } else if n < 0 { "negative" } else { "zero" }
+}
+```
+
+Key ideas:
+- `'static` is a **lifetime** — it means the reference is valid for the entire duration of the program
+- String literals (`"hello"`) are baked into the compiled binary, so they always have `'static` lifetime
+- Lifetimes are how Rust tracks how long references are valid — they prevent dangling references at compile time
+- `'static` is the longest possible lifetime; most lifetimes are shorter and tied to a scope
+- Non-`'static` lifetime syntax: `fn longest<'a>(x: &'a str, y: &'a str) -> &'a str` — `'a` says "the output lives as long as both inputs"
+- You've been using `'static` since P19 (`get_grade`) — this problem makes the concept explicit
+
+---
+
+### P31 — Lifetime annotations (`src/lifetime_annotations.rs`)
+
+Return whichever of two string slices is longer, with explicit lifetime annotation.
+
+```rust
+fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+    if x.len() >= y.len() { x } else { y }
+}
+```
+
+Key ideas:
+- `'a` is a **lifetime parameter** — it names a scope that the compiler will infer at each call site
+- `-> &'a str` says "the returned reference borrows from the same scope as `x` and `y`"
+- The compiler uses this to ensure the returned reference doesn't outlive the data it points to
+- Without `'a`, the compiler can't know whether the return borrows from `x` or `y`, so it rejects the function
+- The annotation doesn't change how the function runs — it's purely information for the borrow checker
+- Lifetime elision: for single-input functions Rust infers the lifetime automatically; multi-input functions that return a reference usually need explicit annotations
+
+---
+
+### P32 — Lifetime elision (`src/elision.rs`)
+
+Strip a prefix from a string, returning a slice tied to the original string's lifetime.
+
+```rust
+fn trim_prefix<'a>(s: &'a str, prefix: &str) -> &'a str {
+    if s.starts_with(prefix) {
+        &s[prefix.len()..]
+    } else {
+        s
+    }
+}
+```
+
+Key ideas:
+- `prefix` has no lifetime annotation — the output never borrows from it, so the compiler doesn't need to track it
+- `'a` only annotates `s` and the return — explicitly saying "output borrows from `s`, not `prefix`"
+- `&s[prefix.len()..]` — slices `s` from the prefix length to the end, returning a `&str` into `s`'s memory
+- **Elision rules** (when the compiler infers lifetimes automatically):
+  1. Each `&` input gets its own lifetime
+  2. If there's exactly one input lifetime, it applies to all outputs
+  3. If one input is `&self`, its lifetime applies to all outputs
+- This function needs explicit `'a` because rule 2 doesn't apply (two reference inputs) and there's no `self`
+
+---
+
+### P33 — Closures (`src/closures.rs`)
+
+Double every element in a slice using `.map()` and a closure.
+
+```rust
+fn double_all(nums: &[i32]) -> Vec<i32> {
+    nums.iter().map(|x| x * 2).collect()
+}
+```
+
+Key ideas:
+- `|x| x * 2` is a **closure** — an anonymous function; `x` is inferred as `&i32` from the iterator
+- Closures capture variables from the surrounding scope: `let factor = 3; nums.iter().map(|x| x * factor)`
+- `.iter()` yields `&i32` references; the `*` dereference is implicit in arithmetic
+- `.map(f)` transforms each element lazily — nothing runs until consumed
+- `.collect()` drives the iterator and gathers results into a `Vec<i32>` (type inferred from return type)
+- Common iterator methods: `.map()`, `.filter()`, `.fold()`, `.sum()`, `.any()`, `.all()`, `.find()`, `.enumerate()`
+- Iterators are lazy — chaining `.map().filter()` builds a pipeline with no intermediate allocations
+
+---
+
+### P34 — Iterators (`src/iterators.rs`)
+
+Square each element and sum the results with a single iterator pipeline.
+
+```rust
+fn sum_of_squares(nums: &[i32]) -> i32 {
+    nums.iter().map(|x| x * x).sum()
+}
+```
+
+Key ideas:
+- `.map(|x| x * x)` transforms each `&i32` — arithmetic auto-derefs the reference
+- `.sum()` is a **consuming adapter** — it drives the iterator to completion and returns the total
+- `.fold()` is the general version: `nums.iter().fold(0, |acc, x| acc + x * x)` — same result, explicit accumulator
+- The whole pipeline is **zero-allocation** — no intermediate `Vec` is created between `.map()` and `.sum()`
+- Iterator chaining mental model: each method wraps the previous in a new lazy iterator; only the final consumer (`.sum()`, `.collect()`, `for`) actually runs the computation
+
+---
+
+### P35 — Filter (`src/filter.rs`)
+
+Keep only even numbers using `.filter()`.
+
+```rust
+fn evens_only(nums: &[i32]) -> Vec<i32> {
+    nums.iter().filter(|&&x| x % 2 == 0).copied().collect()
+}
+```
+
+Key ideas:
+- `.filter()` receives `&&i32` — a reference to a reference — because `.iter()` yields `&i32` and `.filter()` adds another layer of `&`
+- `|&&x|` double-destructures: the outer `&` from `.filter()`, the inner `&` from `.iter()`, binding `x` as plain `i32`
+- `.copied()` converts `&i32` elements to `i32` (works for `Copy` types); `.cloned()` is the equivalent for `Clone` types like `String`
+- Alternatively: `.filter(|x| *x % 2 == 0).copied()` — single `&` destructure with explicit dereference
+- Or use `.iter().copied().filter(|x| x % 2 == 0)` — call `.copied()` first to simplify the closure to `|x: i32|`
+
+---
+
+### P36 — Custom Iterator (`src/custom_iter.rs`)
+
+Implement `Iterator` for a `Countdown` struct that yields n down to 1.
+
+```rust
+impl Iterator for Countdown {
+    type Item = i32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.n > 0 {
+            let current = self.n;
+            self.n -= 1;
+            Some(current)
+        } else {
+            None
+        }
+    }
+}
+```
+
+Key ideas:
+- `Iterator` only requires one method: `fn next(&mut self) -> Option<Self::Item>`
+- Return `Some(value)` to yield the next item; return `None` to signal the iterator is exhausted
+- `&mut self` is needed because iterators advance state — `n` must be decremented each call
+- Once you implement `Iterator`, you get `.map()`, `.filter()`, `.collect()`, `for` loops, and all other iterator methods **for free**
+- Save the current value before decrementing — otherwise you'd return the decremented value
+- The `for n in Countdown::new(5)` loop desugars to calling `.next()` repeatedly until `None`
+
+---
+
+### P37 — Capstone: Text Analysis (`src/capstone.rs`)
+
+Find the most frequently occurring word, returning the first in case of ties.
+
+```rust
+fn most_frequent(s: &str) -> String {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for word in s.split_whitespace() {
+        *counts.entry(word.to_lowercase()).or_insert(0) += 1;
+    }
+
+    let max_count = *counts.values().max().unwrap();
+
+    s.split_whitespace()
+        .map(|w| w.to_lowercase())
+        .find(|w| counts[w.as_str()] == max_count)
+        .unwrap()
+}
+```
+
+Key ideas:
+- `.entry(k).or_insert(0)` — inserts 0 if key absent, returns `&mut usize`; `*` dereferences to increment
+- `.values().max()` — finds the highest count across all entries; returns `Option<&usize>`, so `*` to deref
+- `.find()` returns the **first** element satisfying the predicate — correct for the tie-break rule
+- `.max_by_key()` would return the **last** maximum — wrong for "first appearing" tie-break
+- `counts[w.as_str()]` — `HashMap` supports `&str` indexing even when keyed by `String` via the `Borrow` trait
+- This problem combines: `HashMap`, iterator pipelines, closures, `String`/`&str` conversion, and `Option` handling
+
+---
+
+### P38 — Capstone: 2D Data Processing (`src/diagonal.rs`)
+
+Parse a matrix from a string and sum both diagonals, subtracting the center once if odd-sized.
+
+```rust
+fn diagonal_sum(input: &str) -> i32 {
+    let matrix: Vec<Vec<i32>> = input
+        .split(';')
+        .map(|row| row.split_whitespace().map(|n| n.parse().unwrap()).collect())
+        .collect();
+
+    let n = matrix.len();
+    let mut sum = 0;
+    for i in 0..n {
+        sum += matrix[i][i];          // primary diagonal
+        sum += matrix[i][n - 1 - i];  // secondary diagonal
+    }
+    if n % 2 == 1 {
+        sum -= matrix[n / 2][n / 2];  // center counted twice
+    }
+    sum
+}
+```
+
+Key ideas:
+- Nested `.collect()` — outer collects rows into `Vec<Vec<i32>>`, inner collects values into `Vec<i32>`; type annotation on `matrix` tells the compiler what to build
+- Primary diagonal index: `[i][i]`; secondary diagonal index: `[i][n-1-i]` — both walk from opposite corners
+- `n % 2 == 1` detects odd dimension; center is at `[n/2][n/2]` (integer division)
+- Even matrices have no shared center element, so no subtraction needed
+- This problem combines: string splitting, nested iterator maps, 2D indexing, and arithmetic reasoning about diagonals
+
+---
+
+### P39 — Capstone: Calculator (`src/calculator.rs`)
+
+Parse and evaluate a simple arithmetic expression with full error handling.
+
+```rust
+fn evaluate(expr: &str) -> Result<i32, String> {
+    let parts: Vec<&str> = expr.split_whitespace().collect();
+    if parts.len() != 3 {
+        return Err("invalid expression".to_string());
+    }
+    let a = parts[0].parse::<i32>().map_err(|_| "invalid expression".to_string())?;
+    let op = parts[1];
+    let b = parts[2].parse::<i32>().map_err(|_| "invalid expression".to_string())?;
+    match op {
+        "+" => Ok(a + b),
+        "-" => Ok(a - b),
+        "*" => Ok(a * b),
+        "/" => if b == 0 { Err("division by zero".to_string()) } else { Ok(a / b) },
+        _   => Err("unknown operator".to_string()),
+    }
+}
+```
+
+Key ideas:
+- Validate structure first (`parts.len() != 3`) before attempting to parse — fail fast on malformed input
+- `?` propagates parse errors early; all three error types produce different messages
+- `match op { "+" => ..., _ => Err(...) }` — `match` on `&str` patterns is clean and exhaustive
+- Division by zero is checked inside the `/` arm — it's a runtime condition, not a parse error
+- This problem ties together: `split_whitespace`, `collect`, `.parse()`, `.map_err()`, `?`, and `match` — the full error-handling toolkit

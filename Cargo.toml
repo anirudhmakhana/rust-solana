@@ -104,3 +104,55 @@ path = "src/csv_parse.rs"
 [[bin]]
 name = "generics"
 path = "src/generics.rs"
+
+[[bin]]
+name = "traits"
+path = "src/traits.rs"
+
+[[bin]]
+name = "derive"
+path = "src/derive.rs"
+
+[[bin]]
+name = "assoc_types"
+path = "src/assoc_types.rs"
+
+[[bin]]
+name = "lifetimes"
+path = "src/lifetimes.rs"
+
+[[bin]]
+name = "lifetime_annotations"
+path = "src/lifetime_annotations.rs"
+
+[[bin]]
+name = "elision"
+path = "src/elision.rs"
+
+[[bin]]
+name = "closures"
+path = "src/closures.rs"
+
+[[bin]]
+name = "iterators"
+path = "src/iterators.rs"
+
+[[bin]]
+name = "filter"
+path = "src/filter.rs"
+
+[[bin]]
+name = "custom_iter"
+path = "src/custom_iter.rs"
+
+[[bin]]
+name = "capstone"
+path = "src/capstone.rs"
+
+[[bin]]
+name = "diagonal"
+path = "src/diagonal.rs"
+
+[[bin]]
+name = "calculator"
+path = "src/calculator.rs"
