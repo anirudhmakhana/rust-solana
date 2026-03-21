@@ -1,0 +1,106 @@
+[package]
+name = "rust-solana"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+[[bin]]
+name = "variables"
+path = "src/variables.rs"
+
+[[bin]]
+name = "mutability"
+path = "src/mutability.rs"
+
+[[bin]]
+name = "shadowing"
+path = "src/shadowing.rs"
+
+[[bin]]
+name = "primitives"
+path = "src/primitives.rs"
+
+[[bin]]
+name = "tuples"
+path = "src/tuples.rs"
+
+[[bin]]
+name = "arrays"
+path = "src/arrays.rs"
+
+[[bin]]
+name = "functions"
+path = "src/functions.rs"
+
+[[bin]]
+name = "if_expr"
+path = "src/if_expr.rs"
+
+[[bin]]
+name = "loops"
+path = "src/loops.rs"
+
+[[bin]]
+name = "fizzbuzz"
+path = "src/fizzbuzz.rs"
+
+[[bin]]
+name = "ownership"
+path = "src/ownership.rs"
+
+[[bin]]
+name = "borrowing"
+path = "src/borrowing.rs"
+
+[[bin]]
+name = "mut_borrowing"
+path = "src/mut_borrowing.rs"
+
+[[bin]]
+name = "slices"
+path = "src/slices.rs"
+
+[[bin]]
+name = "structs"
+path = "src/structs.rs"
+
+[[bin]]
+name = "match_expr"
+path = "src/match_expr.rs"
+
+[[bin]]
+name = "option"
+path = "src/option.rs"
+
+[[bin]]
+name = "enums"
+path = "src/enums.rs"
+
+[[bin]]
+name = "vectors"
+path = "src/vectors.rs"
+
+[[bin]]
+name = "strings"
+path = "src/strings.rs"
+
+[[bin]]
+name = "hashmaps"
+path = "src/hashmaps.rs"
+
+[[bin]]
+name = "result"
+path = "src/result.rs"
+
+[[bin]]
+name = "question_mark"
+path = "src/question_mark.rs"
+
+[[bin]]
+name = "csv_parse"
+path = "src/csv_parse.rs"
+
+[[bin]]
+name = "generics"
+path = "src/generics.rs"

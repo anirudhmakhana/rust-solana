@@ -1,0 +1,836 @@
+# Rust Notes
+
+---
+
+## Part 1: Intro and Hello World
+
+### Why Rust
+
+Rust is a compiled systems language designed for performance, memory safety, and strong compile-time checks.
+
+- Strong type safety — variables cannot silently change type
+- Compiles to a native binary
+- Fast at runtime (compiled ahead of time)
+- Low-level system resource access
+- First-class concurrency with threads
+- Memory safety without a garbage collector
+
+### Important mindset
+
+**"If it compiles, it probably works."**
+Rust pushes many bugs into compile-time errors. You do more work before runtime, fewer surprises after deployment.
+
+Rust exposes low-level concerns directly. More control, more correctness, more explicitness.
+
+### Toolchain
+
+- `rustup` — toolchain manager (like `nvm`)
+- `cargo` — build tool + package manager (like `npm`, but also builds, runs, tests)
+
+### Project structure
+
+```bash
+cargo init
+```
+
+Creates:
+- `Cargo.toml` — package manifest (like `package.json`)
+- `src/main.rs` — executable entry point
+
+```toml
+[package]
+name = "my_project"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+```
+
+### Running programs
+
+```bash
+cargo run              # build + execute
+cargo build            # build only → target/debug/
+cargo build --release  # optimized → target/release/
+cargo run --bin NAME   # run a specific binary
+```
+
+### Hello World
+
+```rust
+fn main() {
+    println!("Hello, world!");
+}
+```
+
+- `fn` declares a function
+- `main` is the program entry point
+- `println!` is a macro (note the `!`) — expands at compile time
+- Semicolons end statements
+
+### Multiple binaries in one project
+
+Add to `Cargo.toml`:
+
+```toml
+[[bin]]
+name = "my_program"
+path = "src/my_program.rs"
+```
+
+Then run with `cargo run --bin my_program`.
+
+---
+
+## Part 2: Variables, Types, Strings, Conditionals, Loops, Functions
+
+### Variables with `let`
+
+```rust
+let x = 5;        // type inferred (i32)
+let y: i32 = 5;   // type explicit
+```
+
+Variables are **immutable by default**. To reassign, use `mut`:
+
+```rust
+let mut x = 5;
+x = 6; // ok
+```
+
+### Number types
+
+Rust exposes multiple numeric types — memory layout matters in systems programming.
+
+| Category | Types |
+|---|---|
+| Signed integers | `i8`, `i16`, `i32`, `i64`, `i128` |
+| Unsigned integers | `u8`, `u16`, `u32`, `u64`, `u128` |
+| Floats | `f32`, `f64` |
+
+Default inference: integer literals → `i32`, float literals → `f64`.
+
+`i8` range: -128 to 127. `u8` range: 0 to 255.
+
+**Compile-time vs runtime overflow:**
+- Out-of-range literal → compile error
+- Overflow from runtime arithmetic → runtime panic (in dev mode)
+
+### Booleans
+
+```rust
+let is_active = true;
+if is_active && some_flag { ... }  // && = AND, || = OR
+```
+
+Condition must be `bool` — no truthy/falsy coercion like JavaScript.
+
+### Strings
+
+Two main string types:
+
+| Type | Description |
+|---|---|
+| `String` | Owned, heap-allocated, growable |
+| `&str` | Borrowed string slice (string literals are `&str`) |
+
+```rust
+let s = String::from("Hello");  // owned String
+let s = "Hello";                // &str
+```
+
+Growing a `String` (requires `mut`):
+
+```rust
+let mut s = String::from("Hell");
+s.push('o');          // add one char
+s.push_str(" world"); // add a string slice
+```
+
+**No direct indexing** — use `.chars()` instead:
+
+```rust
+let ch = s.chars().nth(0); // returns Option<char>, not char
+```
+
+Handling `Option<char>`:
+
+```rust
+match ch {
+    Some(c) => println!("{}", c),
+    None => println!("not found"),
+}
+// or shortcut (panics if None):
+let c = s.chars().nth(0).unwrap();
+```
+
+### Conditionals
+
+```rust
+if n % 2 == 0 {
+    println!("even");
+} else {
+    println!("odd");
+}
+```
+
+No parentheses needed around the condition.
+
+### Loops
+
+```rust
+for i in 0..10 { ... }   // 0 to 9 (end is exclusive)
+for _ in 0..10 { ... }   // _ ignores the variable
+```
+
+Iterating over a string:
+
+```rust
+for ch in s.chars() { ... }
+for (i, ch) in s.chars().enumerate() { ... }  // position + char
+```
+
+### Functions
+
+```rust
+fn add(a: i32, b: i32) -> i32 {
+    a + b  // no semicolon = return expression
+}
+```
+
+Parameter types and return type are required. Last expression without `;` is the return value.
+
+---
+
+## Problems
+
+### P1 — Hello World (`src/main.rs`)
+
+Print `Hello, Rust!`.
+
+```rust
+fn main() {
+    println!("Hello, Rust!");
+}
+```
+
+Key idea: `println!` is a macro.
+
+---
+
+### P2 — Variables (`src/variables.rs`)
+
+Bind `x = 42` and `name = "Rust"`, print both.
+
+```rust
+fn main() {
+    let x = 42;
+    let name = "Rust";
+    println!("x = {}", x);
+    println!("name = {}", name);
+}
+```
+
+Key ideas:
+- `let` binds a value to a name
+- Type is inferred: `x` → `i32`, `name` → `&str` (string literal)
+- `{}` is the format placeholder in `println!`
+- No `mut` needed — values are never changed
+
+---
+
+### P3 — Mutability (`src/mutability.rs`)
+
+Compute the sum of 1 to n using a mutable accumulator.
+
+```rust
+fn sum_to(n: i32) -> i32 {
+    let mut total = 0;
+    for i in 1..=n {
+        total += i;
+    }
+    total
+}
+```
+
+Key ideas:
+- `let mut` is required to reassign or modify a variable
+- `1..=n` is an **inclusive** range (includes `n`); `1..n` would exclude `n`
+- `total` on the last line with no `;` is the implicit return value
+- Without `mut`, `total += i` would be a compile error
+
+---
+
+### P4 — Shadowing (`src/shadowing.rs`)
+
+Trim, parse, and square a string value using shadowing at each step.
+
+```rust
+fn transform(s: &str) -> i32 {
+    let s = s.trim();           // &str → &str (whitespace removed)
+    let s: i32 = s.parse().unwrap();  // &str → i32
+    let s = s * s;              // i32 → i32 (squared)
+    s
+}
+```
+
+Key ideas:
+- Each `let s = ...` creates a **new binding** that shadows the previous one
+- Shadowing can change the type — `s` goes from `&str` to `i32`; `mut` cannot do this
+- `"  7  ".trim()` returns a `&str` with leading/trailing whitespace removed
+- `.parse()` returns `Result<i32, _>` — `.unwrap()` extracts the value or panics on failure
+- Shadowing vs `mut`: `mut` keeps the same variable and type; shadowing replaces the binding entirely
+
+---
+
+### P5 — Primitives (`src/primitives.rs`)
+
+Multiply two `i64` values.
+
+```rust
+fn multiply(a: i64, b: i64) -> i64 {
+    a * b
+}
+```
+
+Key ideas:
+- `i64` holds values up to ~9.2 × 10¹⁸ — use it when `i32` might overflow
+- `char` in Rust is a full Unicode scalar (4 bytes), not a single ASCII byte like in C
+- Primitive type summary:
+
+| Category | Types | Default inference |
+|---|---|---|
+| Signed int | `i8`, `i16`, `i32`, `i64`, `i128` | `i32` |
+| Unsigned int | `u8`, `u16`, `u32`, `u64`, `u128` | — |
+| Float | `f32`, `f64` | `f64` |
+| Boolean | `bool` | — |
+| Character | `char` | — |
+
+---
+
+### P6 — Tuples (`src/tuples.rs`)
+
+Return two values in swapped order using a tuple.
+
+```rust
+fn swap(a: i32, b: i32) -> (i32, i32) {
+    (b, a)
+}
+```
+
+Key ideas:
+- Tuples group values of **different types** into one compound value: `(i32, &str, bool)`
+- A function can return a tuple to hand back multiple values
+- **Destructuring** unpacks a tuple into named bindings: `let (x, y) = swap(1, 2);`
+- **Index access** uses `.0`, `.1`, etc.: `pair.0`
+- Tuples are fixed-length — you cannot add or remove elements after creation
+
+---
+
+### P7 — Arrays & Slices (`src/arrays.rs`)
+
+Return the first and last elements of a slice.
+
+```rust
+fn first_last(nums: &[i32]) -> (i32, i32) {
+    (nums[0], nums[nums.len() - 1])
+}
+```
+
+Key ideas:
+- `[i32; 3]` is an **array** — fixed size, known at compile time: `let data = [10, 20, 30];`
+- `&[i32]` is a **slice** — a borrowed view into any contiguous sequence (array or Vec)
+- Passing `&data` converts the array into a slice — slices are the idiomatic way to accept sequences in functions
+- Index access with `nums[0]` panics at runtime if out of bounds (no silent undefined like JS)
+- `.len()` returns the number of elements; last index is always `len() - 1`
+- Slices do not own their data — they borrow it (hence the `&`)
+
+---
+
+### P8 — Functions (`src/functions.rs`)
+
+Return the largest of three `i32` values.
+
+```rust
+fn max_of_three(a: i32, b: i32, c: i32) -> i32 {
+    if a >= b && a >= c {
+        a
+    } else if b >= c {
+        b
+    } else {
+        c
+    }
+}
+```
+
+Key ideas:
+- Every parameter requires a type; return type comes after `->`
+- `if/else if/else` is an **expression** in Rust — each branch returns a value, no `return` needed
+- The last expression in a branch (no `;`) becomes the value of that branch
+- All branches must return the same type — the compiler enforces this
+- `return` exists for early exits but is not idiomatic at the end of a function
+
+---
+
+### P9 — if as an expression (`src/if_expr.rs`)
+
+Return the absolute value of `n` using `if` as an expression.
+
+```rust
+fn abs_value(n: i32) -> i32 {
+    if n < 0 { -n } else { n }
+}
+```
+
+Key ideas:
+- `if` is an **expression** — it produces a value that can be returned directly or assigned
+- Both branches must have the same type; mismatched types are a compile error
+- No semicolon on the branch values — adding `;` would make the branch return `()` (unit), breaking the type
+- Equivalent to a ternary (`n < 0 ? -n : n`) in other languages, but more readable
+- Assigning from `if`: `let label = if score > 90 { "great" } else { "ok" };`
+
+---
+
+### P10 — Loops (`src/loops.rs`)
+
+Compute factorial using a `for` loop.
+
+```rust
+fn factorial(n: u64) -> u64 {
+    let mut result = 1;
+    for i in 2..=n {
+        result *= i;
+    }
+    result
+}
+```
+
+Key ideas:
+- `loop` — infinite loop, exit with `break`; can return a value: `let x = loop { break 42; };`
+- `while cond { }` — runs while condition is true
+- `for i in 1..=n { }` — inclusive range; `1..n` excludes `n`
+- Starting at `2` skips the no-op `*= 1` and handles `n = 0` and `n = 1` correctly (result stays 1)
+- `u64` chosen because factorials grow fast — `20!` already exceeds `i32::MAX`
+
+---
+
+### P11 — FizzBuzz (`src/fizzbuzz.rs`)
+
+Return "Fizz", "Buzz", "FizzBuzz", or the number as a `String`.
+
+```rust
+fn fizzbuzz(n: i32) -> String {
+    if n % 15 == 0 {
+        String::from("FizzBuzz")
+    } else if n % 3 == 0 {
+        String::from("Fizz")
+    } else if n % 5 == 0 {
+        String::from("Buzz")
+    } else {
+        n.to_string()
+    }
+}
+```
+
+Key ideas:
+- Check `% 15` first — if you check `% 3` first, `n = 15` would return "Fizz" and never reach "FizzBuzz"
+- `String::from("...")` creates an owned `String` from a string literal
+- `n.to_string()` converts any type that implements `Display` into an owned `String`
+- The function returns `String` (owned), not `&str` (borrowed) — necessary because the number branch builds a new string at runtime
+- The whole `if/else` chain is an expression; all branches return `String`
+
+---
+
+### P12 — Ownership (`src/ownership.rs`)
+
+Take ownership of two strings and return them concatenated with a space.
+
+```rust
+fn join_strings(a: String, b: String) -> String {
+    a + " " + &b
+}
+```
+
+Key ideas:
+- **Ownership rules**: every value has one owner; when the owner goes out of scope, the value is dropped
+- Passing a `String` to a function **moves** it — the caller can no longer use it after the call
+- The `+` operator on `String` consumes the left-hand side (`a` is moved into the result) and appends a `&str`
+- `&b` coerces `String` → `&str` for the second `+`; `b` is borrowed, not moved
+- After `join_strings(a, b)`, both `a` and `b` are gone — their ownership transferred into the function
+- This is why `String` concatenation looks asymmetric: `String + &str`, not `String + String`
+
+---
+
+### P13 — Borrowing (`src/borrowing.rs`)
+
+Count Unicode characters in a string by borrowing it.
+
+```rust
+fn count_chars(s: &str) -> usize {
+    s.chars().count()
+}
+```
+
+Key ideas:
+- `&` creates a **reference** — the function borrows the value without taking ownership
+- The caller keeps ownership; the value is not dropped after the call
+- `&str` accepts both string literals and `&String` (auto-deref) — prefer `&str` in function signatures
+- `.len()` returns **bytes**, not characters — `"café".len()` = 5, `"café".chars().count()` = 4
+- `.chars()` iterates over Unicode scalar values; `.count()` consumes the iterator and returns the total
+- `usize` is the standard type for counts and lengths — it matches the platform's pointer size
+
+---
+
+### P14 — Mutable Borrowing (`src/mut_borrowing.rs`)
+
+Multiply every element in a vector by 2, modifying it in place.
+
+```rust
+fn double_all(nums: &mut Vec<i32>) {
+    for n in nums.iter_mut() {
+        *n *= 2;
+    }
+}
+```
+
+Key ideas:
+- `&mut T` is a **mutable reference** — lets you modify the value without taking ownership
+- Call site must also be explicit: `double_all(&mut data)` — mutability is opt-in everywhere
+- `*n` **dereferences** the reference to reach the actual value; without `*`, you'd be working on the reference itself
+- `.iter_mut()` yields `&mut i32` references to each element, allowing in-place mutation
+- Rust's borrow rule: **one mutable reference OR any number of immutable references — never both at once**
+- This rule is enforced at compile time, preventing data races without a runtime cost
+- `vec![1, 2, 3]` is the macro shorthand for creating a `Vec<i32>`
+- `{:?}` in `println!` uses the `Debug` format — prints `Vec` as `[2, 4, 6, 8, 10]`
+
+---
+
+### P15 — Slices (`src/slices.rs`)
+
+Extract the first whitespace-separated word from a string.
+
+```rust
+fn first_word(s: &str) -> String {
+    s.split_whitespace()
+        .next()
+        .unwrap_or(s)
+        .to_string()
+}
+```
+
+Key ideas:
+- `&str[0..5]` is a **string slice** — a borrowed view into a portion of string data
+- `.split_whitespace()` returns an iterator of `&str` words, automatically handling multiple/leading spaces
+- `.next()` pulls the first item from an iterator, returning `Option<&str>`
+- `.unwrap_or(s)` provides a fallback if the `Option` is `None` (empty string case) — safer than `.unwrap()`
+- `.to_string()` converts `&str` → `String` (owned) to match the return type
+- The method chain avoids manual index arithmetic and handles edge cases (leading spaces, empty input) cleanly
+
+---
+
+### P16 — Structs (`src/structs.rs`)
+
+Define a `Rectangle` struct and compute its area.
+
+```rust
+struct Rectangle {
+    width: i32,
+    height: i32,
+}
+
+fn rect_area(w: i32, h: i32) -> i32 {
+    let rect = Rectangle { width: w, height: h };
+    rect.width * rect.height
+}
+```
+
+Key ideas:
+- `struct` defines a custom type with named fields — each field has an explicit type
+- Instantiate with `TypeName { field: value, ... }` — all fields must be provided
+- Access fields with `.` dot notation: `rect.width`
+- Structs own their data — the same ownership rules apply (fields with `String` get moved, fields with `i32` get copied)
+- Next step: `impl Rectangle { fn area(&self) -> i32 { ... } }` — attaching methods to a struct
+
+#### P16b — impl blocks (added to `src/structs.rs`)
+
+```rust
+impl Rectangle {
+    fn area(&self) -> i32 {
+        self.width * self.height
+    }
+
+    fn is_square(&self) -> bool {
+        self.width == self.height
+    }
+}
+```
+
+Key ideas:
+- `impl TypeName { }` attaches methods to a struct
+- `&self` is an immutable borrow of the instance — the method reads but doesn't modify
+- `&mut self` would be used if the method needed to mutate fields
+- Access fields through `self.field` inside methods
+- Call with dot notation: `r.area()`, `r.is_square()`
+- Multiple methods live in one `impl` block (or you can have multiple `impl` blocks for the same type)
+
+#### P16c — Associated functions (added to `src/structs.rs`)
+
+```rust
+fn square(size: i32) -> Self {
+    Self { width: size, height: size }
+}
+```
+
+Key ideas:
+- **Associated function**: no `self` parameter — belongs to the type, not an instance
+- Called with `::` syntax: `Rectangle::square(6)`, not `r.square(6)`
+- `Self` refers to the type being implemented (`Rectangle`) — cleaner than repeating the type name
+- Commonly used as constructors/factory methods (Rust has no `new` keyword, this is the convention)
+- `String::from(...)`, `Vec::new()` are both associated functions — you've been using them all along
+
+---
+
+### P17 — match expression (`src/match_expr.rs`)
+
+Map coin names to their cent values using `match`.
+
+```rust
+fn coin_value(coin: &str) -> i32 {
+    match coin {
+        "penny" => 1,
+        "nickel" => 5,
+        "dime" => 10,
+        "quarter" => 25,
+        _ => 0,
+    }
+}
+```
+
+Key ideas:
+- `match` compares a value against **patterns** and runs the first arm that matches
+- `_` is the wildcard — catches any value not matched above; required when not all cases are covered
+- The compiler enforces **exhaustiveness** — every possible value must be handled or the code won't compile
+- `|` combines multiple patterns in one arm: `"Sat" | "Sun" => "weekend"`
+- `match` is an **expression** — it returns the value of the matched arm (no `;` on arm values)
+- All arms must return the same type
+
+---
+
+### P18 — Option (`src/option.rs`)
+
+Return `Some(result)` or `None` to represent a division that may fail.
+
+```rust
+fn safe_divide(a: i32, b: i32) -> Option<i32> {
+    if b == 0 {
+        None
+    } else {
+        Some(a / b)
+    }
+}
+```
+
+Key ideas:
+- `Option<T>` is an enum with two variants: `Some(T)` (value exists) and `None` (no value)
+- There is no `null` in Rust — absence is always represented explicitly in the type
+- The caller is forced to handle both cases; you cannot accidentally use a `None` as a value
+- Common ways to consume an `Option`:
+  - `match` — handle `Some(v)` and `None` explicitly
+  - `.unwrap()` — extract value or panic if `None`
+  - `.unwrap_or(default)` — extract value or use a fallback
+  - `.is_some()` / `.is_none()` — check without extracting
+- `{:?}` prints `Some(5)` and `None` directly via the `Debug` trait
+
+---
+
+### P19 — Enums & range patterns (`src/enums.rs`)
+
+Map a numeric score to a letter grade using `match` with range patterns.
+
+```rust
+fn get_grade(score: i32) -> &'static str {
+    match score {
+        90..=100 => "A",
+        80..=89  => "B",
+        70..=79  => "C",
+        60..=69  => "D",
+        _        => "F",
+    }
+}
+```
+
+Key ideas:
+- `90..=100` is an **inclusive range pattern** inside `match` — matches any value in that range
+- `..=0` means "up to and including 0" (no lower bound needed)
+- `&'static str` — the `'static` lifetime means the string lives for the entire program; string literals always have this lifetime
+- Enums in Rust can carry data inside variants: `enum Shape { Circle(f64), Rect(i32, i32) }` — much more powerful than C-style enums
+- `match` on enums with data uses destructuring: `Shape::Circle(r) => ...`
+
+---
+
+### P20 — Vectors (`src/vectors.rs`)
+
+Sum all elements in a slice.
+
+```rust
+fn sum_vec(nums: &[i32]) -> i32 {
+    let mut total = 0;
+    for n in nums {
+        total += n;
+    }
+    total
+}
+```
+
+Key ideas:
+- `Vec<T>` is a heap-allocated growable array; `vec![1, 2, 3]` is the shorthand macro
+- Functions accept `&[T]` (slice) instead of `&Vec<T>` — slices work with both `Vec` and plain arrays
+- `for n in nums` on a slice yields `&i32` references; Rust auto-derefs in `total += n`
+- Common `Vec` operations: `.push(val)`, `.pop()` → `Option<T>`, `.len()`, `.is_empty()`
+- Iterator shorthand for the same result: `nums.iter().sum()`
+
+---
+
+### P21 — Strings (`src/strings.rs`)
+
+Count vowels in a string regardless of case.
+
+```rust
+fn count_vowels(s: &str) -> usize {
+    s.chars().filter(|c| "aeiou".contains(c.to_ascii_lowercase())).count()
+}
+```
+
+Key ideas:
+- `.chars()` gives an iterator over Unicode `char` values
+- `.filter(|c| ...)` keeps only elements where the closure returns `true`; `|c|` is closure syntax (like an arrow function)
+- `c.to_ascii_lowercase()` normalises case before checking — handles both `'A'` and `'a'`
+- `"aeiou".contains(char)` checks membership — `&str` implements `contains` for both `char` and `&str`
+- The whole chain — `.chars().filter(...).count()` — is a **iterator pipeline**; no intermediate collection is created
+- `String` vs `&str`: accept `&str` in function signatures; it works for both string literals and `&String` (auto-deref)
+
+---
+
+### P22 — HashMaps & HashSets (`src/hashmaps.rs`)
+
+Count distinct words in a string using a `HashSet`.
+
+```rust
+use std::collections::HashSet;
+
+fn unique_word_count(s: &str) -> usize {
+    s.split_whitespace().collect::<HashSet<_>>().len()
+}
+```
+
+Key ideas:
+- `HashSet<T>` stores unique values — inserting a duplicate is a no-op
+- `HashMap<K, V>` stores key-value pairs; `.get(key)` returns `Option<&V>`
+- Both require `use std::collections::{HashMap, HashSet}` — not in the prelude by default
+- `.collect::<HashSet<_>>()` — `.collect()` consumes an iterator into a collection; the turbofish `::<HashSet<_>>` tells the compiler which collection type to build (`_` lets it infer the element type)
+- Common `HashMap` operations:
+  - `.insert(k, v)` — add or overwrite
+  - `.get(k)` → `Option<&V>`
+  - `.entry(k).or_insert(default)` — insert only if key is absent (useful for counting)
+
+---
+
+### P23 — Result (`src/result.rs`)
+
+Parse a string to `i32`, returning `Ok` or a custom `Err`.
+
+```rust
+fn parse_number(s: &str) -> Result<i32, String> {
+    s.parse::<i32>().map_err(|_| "invalid number".to_string())
+}
+```
+
+Key ideas:
+- `Result<T, E>` has two variants: `Ok(T)` on success, `Err(E)` on failure — no exceptions
+- `.parse::<i32>()` returns `Result<i32, ParseIntError>`; the turbofish specifies the target type
+- `.map_err(|e| ...)` transforms the error variant while leaving `Ok` untouched — used to convert error types
+- `|_|` ignores the original error value (we don't need it, just want our custom message)
+- Common ways to consume a `Result`:
+  - `match` — handle both arms explicitly
+  - `.unwrap()` — extract `Ok` or panic on `Err`
+  - `.unwrap_or(default)` — extract `Ok` or use a fallback
+  - `?` operator — propagate `Err` up to the calling function (covered later)
+- `Result` vs `Option`: `Option` = value may be absent; `Result` = operation may fail with an error
+
+---
+
+### P24 — The `?` operator (`src/question_mark.rs`)
+
+Parse two strings and return their sum, propagating errors early.
+
+```rust
+fn add_parsed(a: &str, b: &str) -> Result<i32, String> {
+    let a = a.parse::<i32>().map_err(|_| "parse error".to_string())?;
+    let b = b.parse::<i32>().map_err(|_| "parse error".to_string())?;
+    Ok(a + b)
+}
+```
+
+Key ideas:
+- `?` at the end of a `Result` expression: if `Ok(v)` → unwraps to `v` and continues; if `Err(e)` → returns `Err(e)` immediately from the function
+- The function must return `Result` (or `Option`) for `?` to work
+- `?` replaces a verbose `match` — without it, each parse would need its own `match` block
+- The error types must match (or implement `From` conversion) — `.map_err()` handles the conversion here
+- `Ok(a + b)` at the end — the happy path must be explicitly wrapped in `Ok`
+- This is the standard Rust error propagation pattern; real code uses `?` extensively
+
+---
+
+### P25 — Combining error handling (`src/csv_parse.rs`)
+
+Parse a comma-separated string of numbers and sum them, with descriptive errors.
+
+```rust
+fn parse_csv_sum(s: &str) -> Result<i32, String> {
+    if s.is_empty() {
+        return Err("empty input".to_string());
+    }
+    let mut sum = 0;
+    for token in s.split(',') {
+        let n = token
+            .trim()
+            .parse::<i32>()
+            .map_err(|_| format!("invalid number: {}", token.trim()))?;
+        sum += n;
+    }
+    Ok(sum)
+}
+```
+
+Key ideas:
+- Early `return Err(...)` for the empty case — checked before any iteration
+- `.split(',')` splits on a char delimiter, yielding `&str` tokens
+- `.trim()` handles any whitespace around commas (e.g. `"1, 2, 3"`)
+- `format!("invalid number: {}", token)` builds a dynamic error string — like `println!` but returns a `String`
+- `?` short-circuits the loop on the first bad token — the rest are never processed
+- This pattern (validate → iterate → accumulate → return `Ok`) is the standard shape for fallible processing
+
+---
+
+### P26 — Generics (`src/generics.rs`)
+
+Find the largest element in a slice.
+
+```rust
+fn largest(list: &[i32]) -> i32 {
+    let mut max = list[0];
+    for &n in &list[1..] {
+        if n > max {
+            max = n;
+        }
+    }
+    max
+}
+```
+
+Key ideas:
+- `for &n in &list[1..]` — the `&n` pattern **destructures** the `&i32` reference, binding `n` as a plain `i32` copy
+- `list[1..]` is a slice starting from index 1 — skips the first element already stored in `max`
+- The generic version would be `fn largest<T: PartialOrd>(list: &[T]) -> T` — `T: PartialOrd` is the trait bound that allows `>`
+- Trait bounds (`T: Trait`) constrain generics to types that implement specific behaviour — the compiler verifies this
+- `i32` is `Copy`, so `max = n` copies the value; for non-`Copy` types (like `String`) you'd need references
