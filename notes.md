@@ -1171,3 +1171,414 @@ Key ideas:
 - `match op { "+" => ..., _ => Err(...) }` — `match` on `&str` patterns is clean and exhaustive
 - Division by zero is checked inside the `/` arm — it's a runtime condition, not a parse error
 - This problem ties together: `split_whitespace`, `collect`, `.parse()`, `.map_err()`, `?`, and `match` — the full error-handling toolkit
+
+---
+
+# Week 2 — Advanced Rust: Smart Pointers & Concurrency
+
+---
+
+## Foundation: Stack vs Heap (refresh before every problem this week)
+
+Every value in Rust lives in one of two places. This matters constantly in week 2.
+
+```
+STACK                          HEAP
+─────────────────────          ──────────────────────────────
+Fast. Fixed size.              Slower. Dynamic size.
+Cleaned up automatically       You control when it's freed
+when scope ends.               (Rust does it via Drop).
+
+let x: i32 = 5;               let s = String::from("hi");
+┌───────────┐                  STACK          HEAP
+│  x = 5   │                  ┌─────────┐    ┌───────────┐
+└───────────┘                  │ ptr  ───────▶│  "hi"     │
+                               │ len = 2 │    └───────────┘
+                               │ cap = 2 │
+                               └─────────┘
+
+The String struct (ptr + len + cap) lives on the stack.
+The actual text data lives on the heap.
+```
+
+**Rule of thumb:**
+- Known size at compile time → stack (`i32`, `bool`, `[i32; 3]`, tuples of those)
+- Unknown/dynamic size → heap (`String`, `Vec<T>`, `Box<T>`, `Rc<T>`, `Arc<T>`)
+
+---
+
+## Part 3: Smart Pointers
+
+A **smart pointer** is a struct that wraps a pointer but adds extra behaviour — like automatic cleanup, reference counting, or runtime borrow checking. They all implement `Deref` (so you can use them like a regular reference) and `Drop` (so memory is freed automatically).
+
+| Type | Owners | Thread-safe? | Mutation | Use when |
+|---|---|---|---|---|
+| `Box<T>` | 1 | Yes | Normal rules | Heap alloc, recursive types, trait objects |
+| `Rc<T>` | Many | No | Immutable only | Multiple owners in single-threaded code |
+| `RefCell<T>` | 1 | No | Interior (runtime) | Need to mutate through a shared reference |
+| `Rc<RefCell<T>>` | Many | No | Interior (runtime) | Multiple owners + mutation, single-thread |
+| `Arc<T>` | Many | Yes | Immutable only | Multiple owners across threads |
+| `Mutex<T>` | 1 lock | Yes | Exclusive (locked) | Mutable shared state across threads |
+| `Arc<Mutex<T>>` | Many | Yes | Exclusive (locked) | The standard shared mutable state pattern |
+
+---
+
+### W2-P1 — Box\<T\> (`src/box_type.rs`)
+
+**[Docs: Box\<T\>](https://doc.rust-lang.org/book/ch15-01-box.html)**
+
+Heap-allocate a recursive linked list and sum its values.
+
+```rust
+enum List {
+    Cons(i32, Box<List>),
+    Nil,
+}
+
+fn list_sum(list: &List) -> i32 {
+    match list {
+        List::Cons(val, rest) => val + list_sum(rest),
+        List::Nil => 0,
+    }
+}
+```
+
+#### Why Box is needed here
+
+Without `Box`, the compiler rejects the enum:
+
+```
+// BROKEN — compile error
+enum List {
+    Cons(i32, List),   // List contains List contains List... infinite size
+    Nil,
+}
+```
+
+The compiler needs to know the byte size of every type at compile time. A `List` that contains a `List` has no fixed size — it's infinite. `Box` breaks the cycle:
+
+```
+// FIXED
+enum List {
+    Cons(i32, Box<List>),   // Box is always pointer-sized: 8 bytes on 64-bit
+    Nil,
+}
+```
+
+#### Memory layout of Cons(3, Cons(2, Cons(1, Nil)))
+
+```
+STACK                HEAP
+┌──────────────┐
+│ list         │
+│  tag: Cons   │
+│  val: 3      │
+│  ptr ────────────▶ ┌──────────────┐
+└──────────────┘     │  tag: Cons   │
+                     │  val: 2      │
+                     │  ptr ────────────▶ ┌──────────────┐
+                     └──────────────┘     │  tag: Cons   │
+                                          │  val: 1      │
+                                          │  ptr ────────────▶ ┌──────┐
+                                          └──────────────┘     │  Nil │
+                                                               └──────┘
+```
+
+Each `Box` is just a pointer (8 bytes on the stack/heap) that owns the next node on the heap. When the outermost `Box` is dropped, it chains-drops everything recursively.
+
+#### Key ideas
+
+- `Box::new(val)` moves `val` to the heap; returns a `Box<T>` (stack pointer to heap data)
+- `Box` implements `Deref` → you can use `*b` or just `.field` and Rust auto-derefs
+- `Box` implements `Drop` → when `Box` goes out of scope, the heap allocation is freed automatically
+- When pattern matching on `&List`, Rust auto-derefs `&Box<List>` → `&List` — no `*` needed
+- Three core uses of `Box`:
+  1. **Recursive types** (this problem)
+  2. **Trait objects**: `Box<dyn Draw>` — store any type implementing `Draw` behind a pointer
+  3. **Large data**: move a huge struct to the heap to avoid stack overflow
+
+---
+
+### W2-P2 — Deref trait (`src/deref_trait.rs`)
+
+**[Docs: Deref trait](https://doc.rust-lang.org/book/ch15-02-deref.html)**
+
+Implement `Deref` on a wrapper type so it transparently coerces to its inner type.
+
+```rust
+use std::ops::Deref;
+
+struct Wrapper<T>(T);
+
+impl<T> Deref for Wrapper<T> {
+    type Target = T;
+    fn deref(&self) -> &T { &self.0 }
+}
+
+fn double_len(s: &str) -> usize { s.len() * 2 }
+
+fn main() {
+    let w = Wrapper(String::from("hello"));
+    println!("{}", double_len(&w)); // 10
+}
+```
+
+#### What deref coercion looks like in memory
+
+```
+You write:        double_len(&w)
+                             │
+                    &Wrapper<String>
+                             │  Rust calls w.deref()
+                             ▼
+                          &String       ← Wrapper's Deref impl returns &self.0
+                             │  Rust calls String's built-in Deref
+                             ▼
+                           &str         ← what double_len actually receives
+```
+
+Rust applies as many deref steps as needed — at compile time, zero runtime cost.
+
+#### Key ideas
+
+- `Deref` has one required method: `fn deref(&self) -> &Self::Target`
+- `*x` desugars to `*(x.deref())` — the `*` operator calls `deref()` under the hood
+- **Deref coercion** happens automatically when passing `&T` where `&U` is expected, if `T: Deref<Target=U>`
+- The coercion chain in this problem: `&Wrapper<String>` → `&String` → `&str` (two hops)
+- Built-in coercions you already use: `&String` → `&str`, `&Vec<T>` → `&[T]`, `&Box<T>` → `&T`
+- `DerefMut` is the mutable version: `fn deref_mut(&mut self) -> &mut Self::Target`
+- Tuple struct field access: `self.0` is the first (and only) field of `Wrapper<T>(T)`
+
+---
+
+### W2-P3 — Rc<T> (`src/rc_type.rs`)
+
+**[Docs: Rc\<T\>](https://doc.rust-lang.org/book/ch15-04-rc.html)**
+
+Multiple owners of the same heap data via reference counting.
+
+```rust
+use std::rc::Rc;
+
+fn count_owners(n: usize) -> usize {
+    let shared = Rc::new("shared".to_string());
+    let _clones: Vec<Rc<String>> = (0..n).map(|_| Rc::clone(&shared)).collect();
+    Rc::strong_count(&shared)
+}
+```
+
+#### Memory layout — what Rc actually looks like
+
+```
+Normal Box (one owner):           Rc (multiple owners):
+
+STACK        HEAP                 STACK        HEAP
+┌───────┐    ┌──────────┐         ┌────────┐   ┌───────────────────┐
+│  box ─────▶│  "data"  │         │  rc1 ──────▶│ strong_count: 3   │
+└───────┘    └──────────┘         └────────┘   │ weak_count:   0   │
+                                  ┌────────┐   │ data: "shared"    │
+                                  │  rc2 ──────▶│                   │
+                                  └────────┘   └───────────────────┘
+                                  ┌────────┐          ▲
+                                  │  rc3 ─────────────┘
+                                  └────────┘
+
+All three Rc pointers point to the SAME heap allocation.
+Rc::clone only increments strong_count — no data is copied.
+When count reaches 0, the data is freed.
+```
+
+#### Key ideas
+
+- `Rc<T>` = reference-counted pointer — multiple owners, single-threaded only
+- `Rc::clone(&rc)` increments the count; does NOT copy the inner data (unlike `.clone()` on a String)
+- `Rc::strong_count(&rc)` returns the current owner count
+- When an `Rc` is dropped, count decrements; at 0, heap data is freed
+- `Rc<T>` gives **immutable** access only — you cannot mutate through a plain `Rc`
+- For mutation with multiple owners → `Rc<RefCell<T>>` (next problem)
+- **NOT thread-safe** — use `Arc<T>` for multi-threaded shared ownership
+- `Rc` has no runtime overhead beyond the count increment/decrement
+
+---
+
+### W2-P4 — RefCell<T> (`src/refcell.rs`)
+
+**[Docs: RefCell\<T\>](https://doc.rust-lang.org/book/ch15-05-interior-mutability.html)**
+
+Mutate data through an immutable (`&self`) reference using runtime borrow checking.
+
+```rust
+use std::cell::RefCell;
+
+struct Counter { value: RefCell<i32> }
+
+impl Counter {
+    fn increment(&self) { *self.value.borrow_mut() += 1; }
+    fn get(&self) -> i32 { *self.value.borrow() }
+}
+```
+
+#### Compile-time vs runtime borrow checking
+
+```
+Normal Rust (compile-time):          RefCell (runtime):
+
+fn increment(&mut self) {            fn increment(&self) {
+    self.value += 1;                     *self.value.borrow_mut() += 1;
+}                                    }
+   ▲                                        ▲
+   Compiler enforces the rule.              RefCell enforces the rule.
+   Violation = compile error.              Violation = runtime panic.
+   Zero overhead.                          Small overhead (tracks borrow state).
+```
+
+#### What RefCell tracks internally
+
+```
+RefCell<i32>
+┌────────────────────────────────┐
+│  borrow_count: 0               │  ← how many active borrow() calls
+│  mut_borrow: false             │  ← is borrow_mut() active?
+│  value: 42                     │  ← the actual data
+└────────────────────────────────┘
+
+borrow()      → increments borrow_count, returns Ref<i32>
+borrow_mut()  → sets mut_borrow = true, returns RefMut<i32>
+Drop Ref      → decrements borrow_count
+Drop RefMut   → sets mut_borrow = false
+
+PANIC if:  borrow_mut() called while borrow_count > 0
+PANIC if:  borrow() or borrow_mut() called while mut_borrow = true
+```
+
+#### Key ideas
+
+- **Interior mutability**: mutate data even when you only hold `&self` (immutable reference)
+- `borrow()` → `Ref<T>` — immutable, like `&T`; multiple allowed at once
+- `borrow_mut()` → `RefMut<T>` — mutable, like `&mut T`; exclusive — no other borrows active
+- `Ref`/`RefMut` are dropped at end of statement (or when explicitly dropped) — borrow released
+- Borrow violations → **runtime panic**, not compile error — use carefully
+- Single-threaded only — use `Mutex<T>` for multi-threaded interior mutability
+- **Common pattern**: `Rc<RefCell<T>>` = multiple owners + mutation in single-threaded code
+
+---
+
+### W2-P5 — Trait objects / Box<dyn Trait> (`src/trait_objects.rs`)
+
+**[Docs: Trait Objects](https://doc.rust-lang.org/book/ch17-02-trait-objects.html)**
+
+Store different concrete types in the same collection via dynamic dispatch.
+
+```rust
+trait Shape { fn area(&self) -> f64; }
+impl Shape for Circle { fn area(&self) -> f64 { PI * self.radius * self.radius } }
+impl Shape for Rect   { fn area(&self) -> f64 { self.w * self.h } }
+
+fn total_area(shapes: &[Box<dyn Shape>]) -> f64 {
+    shapes.iter().map(|s| s.area()).sum()
+}
+```
+
+#### Static dispatch (generics) vs dynamic dispatch (trait objects)
+
+```
+STATIC — fn largest<T: Shape>(s: &T)       DYNAMIC — fn draw(s: &dyn Shape)
+─────────────────────────────────           ──────────────────────────────────
+Compiler generates one version              One function, resolved at runtime
+of the function per concrete type.          via vtable lookup.
+
+Faster at runtime (inlined).                Tiny runtime cost (one pointer follow).
+Larger binary (more code generated).        Smaller binary.
+Type known at compile time.                 Type NOT known at compile time.
+Cannot mix types in a Vec.                  Can mix types in a Vec<Box<dyn Shape>>.
+```
+
+#### Memory layout of Vec<Box<dyn Shape>>
+
+```
+Vec on stack:
+┌─────────────────────┐
+│ ptr, len, cap       │
+└──────────┬──────────┘
+           │
+           ▼  (heap — the Vec's buffer)
+┌──────────────────┬──────────────────┬──────────────────┐
+│  Box<dyn Shape>  │  Box<dyn Shape>  │  Box<dyn Shape>  │
+│  [data_ptr]      │  [data_ptr]      │  [data_ptr]      │
+│  [vtable_ptr]    │  [vtable_ptr]    │  [vtable_ptr]    │
+└────────┬─────────┴────────┬─────────┴────────┬─────────┘
+         │                  │                  │
+         ▼                  ▼                  ▼
+    Circle{r:1.0}      Rect{w:2,h:3}     Circle{r:2.0}
+    (on heap)          (on heap)          (on heap)
+         │                  │
+         ▼                  ▼
+   Circle's vtable     Rect's vtable
+   [area: fn ptr]      [area: fn ptr]
+```
+
+Every `Box<dyn Shape>` is a **fat pointer**: data pointer + vtable pointer. Same size everywhere.
+
+#### Key ideas
+
+- `dyn Trait` = trait object — concrete type erased, method calls resolved via vtable at runtime
+- `Box<dyn Trait>` is required to store trait objects — `dyn Trait` alone has no known size
+- A fat pointer = (pointer to data, pointer to vtable) — always 2 × pointer size (16 bytes on 64-bit)
+- Vtable contains one function pointer per trait method — calling `.area()` follows the vtable
+- `&dyn Trait` also works for borrowing; `Box<dyn Trait>` is for ownership
+- Use when: mixed types in a collection, plugin systems, callback-style APIs
+- Use generics instead when: single type known at compile time and you want zero overhead
+
+---
+
+### W2-P6 — Trait object pipeline (`src/pipeline.rs`)
+
+**[Docs: Trait Objects](https://doc.rust-lang.org/book/ch17-02-trait-objects.html)**
+
+Build a dynamic processing pipeline where each step is a different `Formatter` implementation.
+
+```rust
+trait Formatter { fn format(&self, input: &str) -> String; }
+
+struct Upper; struct Snake; struct Trim;
+// impl Formatter for each...
+
+fn apply_all(input: &str, fmts: &[Box<dyn Formatter>]) -> String {
+    fmts.iter().fold(input.to_string(), |acc, f| f.format(&acc))
+}
+```
+
+#### How .fold() threads data through the pipeline
+
+```
+input: "  hello world  "
+
+fmts:  [Trim,          Upper,          Snake        ]
+        │               │               │
+        ▼               ▼               ▼
+acc:  "  hello world  "
+        │
+        Trim::format()
+        │
+        ▼
+acc:  "hello world"
+        │
+        Upper::format()
+        │
+        ▼
+acc:  "HELLO WORLD"
+        │
+        Snake::format()
+        │
+        ▼
+acc:  "HELLO_WORLD"    ← final result
+```
+
+#### Key ideas
+
+- **Unit structs** (`struct Upper;`) have no fields and take zero bytes — they exist only as a type to attach an `impl` to
+- `.fold(init, |acc, item| ...)` — threads `acc` through every step; output of each becomes input to next
+- The pipeline order is determined at runtime by the order of the `Vec` — swap the `Box::new(...)` calls to change behaviour
+- Each `Box<dyn Formatter>` is a fat pointer: one pointer to the zero-byte unit struct (or actual data), one to the vtable
+- This pattern (Strategy pattern) separates *what* to do (the `Vec`) from *how* (each `impl`)
+- `.replace(' ', "_")` — `char` literal uses single quotes; string literal uses double quotes
