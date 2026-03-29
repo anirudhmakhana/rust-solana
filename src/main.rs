@@ -1,3 +1,3 @@
 fn main() {
-    println!("Hello, Rust!");
+    println!("Week 2 — Advanced Rust");
 }
