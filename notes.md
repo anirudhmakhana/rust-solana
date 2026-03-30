@@ -1582,3 +1582,820 @@ acc:  "HELLO_WORLD"    ← final result
 - Each `Box<dyn Formatter>` is a fat pointer: one pointer to the zero-byte unit struct (or actual data), one to the vtable
 - This pattern (Strategy pattern) separates *what* to do (the `Vec`) from *how* (each `impl`)
 - `.replace(' ', "_")` — `char` literal uses single quotes; string literal uses double quotes
+
+---
+
+### W2-P7 — Newtype pattern + Display (`src/newtype.rs`)
+
+**[Docs: Newtype Pattern](https://doc.rust-lang.org/book/ch19-03-advanced-traits.html#using-the-newtype-pattern-to-implement-external-traits-on-external-types)**
+
+Wrap a foreign type in your own struct to implement foreign traits on it.
+
+```rust
+use std::fmt;
+
+struct CommaSeparated(Vec<i32>);
+
+impl fmt::Display for CommaSeparated {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let len = self.0.len();
+        for (i, val) in self.0.iter().enumerate() {
+            if i < len - 1 { write!(f, "{}, ", val)?; }
+            else            { write!(f, "{}", val)?;  }
+        }
+        Ok(())
+    }
+}
+
+fn format_list(nums: Vec<i32>) -> String {
+    format!("{}", CommaSeparated(nums))
+}
+```
+
+#### The orphan rule
+
+```
+FORBIDDEN:                          ALLOWED (newtype):
+impl Display for Vec<i32> { }       struct CommaSeparated(Vec<i32>);
+     ▲              ▲               impl Display for CommaSeparated { }
+     │              │                    ▲              ▲
+  foreign          foreign            YOUR type      foreign
+  trait            type
+                                    At least one side must be yours.
+```
+
+Rust enforces this to prevent two crates from providing conflicting implementations
+of the same trait for the same type.
+
+#### How fmt::Display works
+
+```
+println!("{}", value)
+    │
+    └─▶ calls value.fmt(formatter)  ← your Display impl
+            │
+            └─▶ write!(f, ...)      ← writes into the formatter buffer
+                    │
+                    └─▶ returns fmt::Result (Ok or Err)
+                            │
+                            └─▶ ? propagates Err upward (same ? as Result)
+```
+
+#### Key ideas
+
+- **Newtype** = `struct Foo(ExistingType)` — a zero-cost wrapper (compiles to the same thing)
+- `self.0` — accesses the first field of a tuple struct
+- `Display` trait (`{}`) vs `Debug` trait (`{:?}`) — implement `Display` for user-facing output
+- `write!(f, ...)` writes into the formatter; `?` propagates formatting errors
+- `fmt::Formatter<'_>` — the `'_` is an elided lifetime (Rust infers it)
+- `format!("{}", x)` calls `x`'s `Display` impl and returns a `String`
+- Zero runtime cost — newtype wrapper is compiled away; same memory layout as the inner type
+
+---
+
+### W2-P8 — Associated types (`src/assoc_types.rs`)
+
+**[Docs: Associated Types](https://doc.rust-lang.org/book/ch19-03-advanced-traits.html#specifying-placeholder-types-in-trait-definitions-with-associated-types)**
+
+Fix the output type per implementor using an associated type instead of a generic parameter.
+
+```rust
+trait Summary {
+    type Output;
+    fn summarize(&self) -> Self::Output;
+}
+
+impl Summary for Numbers {
+    type Output = i32;
+    fn summarize(&self) -> i32 { self.data.iter().sum() }
+}
+
+impl Summary for Words {
+    type Output = String;
+    fn summarize(&self) -> String { self.data.join(" ") }
+}
+```
+
+#### Associated type vs generic parameter — side by side
+
+```
+GENERIC PARAMETER                    ASSOCIATED TYPE
+─────────────────────────────────    ─────────────────────────────────
+trait Summary<T> {                   trait Summary {
+    fn summarize(&self) -> T;            type Output;
+}                                        fn summarize(&self) -> Self::Output;
+                                     }
+
+impl Summary<i32> for Numbers {}     impl Summary for Numbers {
+impl Summary<String> for Numbers {}      type Output = i32;
+   ▲ BOTH valid — ambiguous!         }
+                                         ▲ Only ONE impl allowed.
+
+Call site needs annotation:          Call site needs nothing:
+let x: i32 = n.summarize();         let x = n.summarize(); // compiler knows i32
+```
+
+#### When to use which
+
+| Use | When |
+|---|---|
+| Associated type | One natural output type per implementor (Iterator, Summary here) |
+| Generic parameter | Multiple valid impls for different types (`From<T>`, `Into<T>`) |
+
+The `Iterator` trait uses `type Item` — each iterator has exactly one element type. That's the most important associated type in Rust's standard library.
+
+#### Key ideas
+
+- `type Output;` inside a trait = a placeholder type that each implementor must specify
+- `Self::Output` = "whatever this type set Output to"
+- `.iter().sum()` — works because `i32` implements `std::iter::Sum`
+- `.join(" ")` — `Vec<String>` auto-derefs to `&[String]`; `join` produces a new `String`
+
+---
+
+### W2-P9 — Operator overloading (`src/operator_overload.rs`)
+
+**[Docs: std::ops](https://doc.rust-lang.org/std/ops/index.html)**
+
+Define what `+` means for your type by implementing the `Add` trait.
+
+```rust
+use std::ops::Add;
+
+impl Add for Vec2 {
+    type Output = Vec2;
+    fn add(self, rhs: Vec2) -> Vec2 {
+        Vec2 { x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+```
+
+#### How a + b desugars
+
+```
+a + b
+  │
+  └─▶ Add::add(a, b)    ← compiler rewrites this for you
+
+// Equivalent explicit call:
+let result = Vec2::add(a, b);
+```
+
+#### Ownership in Add
+
+```
+impl Add for Vec2 {                 impl Add for &Vec2 {
+    fn add(self, rhs: Vec2)             fn add(self, rhs: &Vec2)
+                                                 (self is &Vec2 here)
+    MOVES both operands.                BORROWS both — originals still usable.
+    a and b are gone after a + b.       &a + &b works, a and b still live.
+}                                   }
+```
+
+#### Key ideas
+
+- `std::ops` contains all overloadable operators: `Add`, `Sub`, `Mul`, `Div`, `Neg`, `Index`, etc.
+- `type Output` = associated type — what the operation produces (can differ from the inputs)
+- `add(self, rhs)` takes ownership — implement on `&Vec2` if you need to reuse the values after
+- `{:.1}` in format strings = 1 decimal place; `{:.3}` = 3 decimal places
+- Operator overloading in Rust is explicit and opt-in — no hidden behaviour
+- `a + b` is purely syntactic sugar for `Add::add(a, b)` — no magic
+
+---
+
+### W2-P10 — Function pointers (`src/fn_pointers.rs`)
+
+**[Docs: Function pointers](https://doc.rust-lang.org/reference/types/function-pointer.html)**
+
+Pass named functions as values using `fn(Args) -> Return` types.
+
+```rust
+fn double(x: i32) -> i32 { x * 2 }
+fn increment(x: i32) -> i32 { x + 1 }
+
+fn apply_twice(f: fn(i32) -> i32, x: i32) -> i32 {
+    f(f(x))
+}
+```
+
+#### fn pointer vs closure — what's the difference
+
+```
+FUNCTION POINTER: fn(i32) -> i32        CLOSURE: impl Fn(i32) -> i32
+──────────────────────────────────      ─────────────────────────────────
+Points to a named function.             Anonymous, defined inline.
+Cannot capture environment.             CAN capture environment.
+
+fn double(x: i32) -> i32 { x * 2 }     let factor = 3;
+let f: fn(i32) -> i32 = double;        let triple = |x| x * factor;
+                                                          ▲
+                                               captured from scope
+
+fn pointers implement Fn, FnMut,        Closures implement Fn/FnMut/FnOnce
+and FnOnce — so they work anywhere      depending on how they capture.
+a closure is expected.
+```
+
+#### apply_twice trace
+
+```
+apply_twice(double, 3)
+  f = double, x = 3
+  f(x)    → double(3) → 6
+  f(f(x)) → double(6) → 12  ✓
+
+apply_twice(increment, 10)
+  f = increment, x = 10
+  f(x)    → increment(10) → 11
+  f(f(x)) → increment(11) → 12  ✓
+```
+
+#### Key ideas
+
+- `fn(i32) -> i32` is a concrete type (not a trait) — a pointer to a function in the binary
+- Function pointers are `Copy` — they're just an address (8 bytes), no heap involved
+- Named functions coerce to `fn` pointers automatically: `let f: fn(i32) -> i32 = double;`
+- `fn` pointers implement `Fn`, `FnMut`, `FnOnce` — they work wherever a closure is expected
+- For higher-order functions that accept closures too, prefer `impl Fn(i32) -> i32` or `F: Fn(i32) -> i32` as the parameter type
+
+---
+
+### W2-P11 — Returning closures (`src/returning_closures.rs`)
+
+**[Docs: Returning Closures](https://doc.rust-lang.org/book/ch13-01-closures.html#returning-closures)**
+
+Return a closure from a function by boxing it, and compose closures into new closures.
+
+```rust
+fn make_multiplier(n: i32) -> Box<dyn Fn(i32) -> i32> {
+    Box::new(move |x| x * n)
+}
+
+fn compose(
+    f: Box<dyn Fn(i32) -> i32>,
+    g: Box<dyn Fn(i32) -> i32>,
+) -> Box<dyn Fn(i32) -> i32> {
+    Box::new(move |x| f(g(x)))
+}
+```
+
+#### Why Box is required here
+
+```
+Every closure has a unique anonymous type — you cannot write it down.
+
+fn bad() -> impl Fn(i32) -> i32 {       fn good() -> Box<dyn Fn(i32) -> i32> {
+    |x| x * 2                               Box::new(|x| x * 2)
+}   ▲ works for RETURNING one closure   }   ▲ works everywhere, including compose()
+
+// compose() takes two closures — each has a DIFFERENT anonymous type.
+// impl Fn() would mean a single static type. Box<dyn Fn()> erases the type → works.
+```
+
+#### What `move` does in a closure
+
+```
+WITHOUT move:                            WITH move:
+──────────────                           ──────────
+fn make_multiplier(n: i32) -> ...  {     fn make_multiplier(n: i32) -> ... {
+    Box::new(|x| x * n)                      Box::new(move |x| x * n)
+}              ▲                         }              ▲
+    n is borrowed — but n lives              n is MOVED into the closure.
+    on the stack and is gone                 The closure owns n.
+    after the function returns.              Lives as long as the closure does.
+    COMPILE ERROR: dangling ref.
+```
+
+#### Memory layout of a captured closure
+
+```
+STACK (make_multiplier frame — gone after return)
+
+n: i32 = 3   ──move──▶   HEAP (inside the Box)
+                          ┌──────────────────────┐
+                          │ closure data: n = 3  │
+                          │ fn ptr: |x| x * n    │
+                          └──────────────────────┘
+                                    ▲
+                          Box<dyn Fn(i32)->i32>
+                          points here
+```
+
+#### Key ideas
+
+- Every closure has a unique, unnameable type — return `Box<dyn Fn(...)>` to erase it
+- `move` transfers captured variables from the stack into the closure's heap allocation
+- `move` is required whenever the closure outlives the function that created it
+- `Fn` = can be called many times, doesn't mutate captured state
+- `FnMut` = can be called many times, may mutate captured state (`*count += 1`)
+- `FnOnce` = can only be called once (consumes captured values)
+- `compose(f, g)` moves both `f` and `g` into the new closure — they're now owned by it
+
+---
+
+### W2-P12 — Match guards & @ bindings (`src/match_guards.rs`)
+
+**[Docs: Patterns and Matching](https://doc.rust-lang.org/book/ch18-03-pattern-syntax.html)**
+
+Add runtime conditions and capture matched values with guards and `@`.
+
+```rust
+fn classify(n: i32) -> String {
+    match n {
+        0          => "zero".to_string(),
+        n @ 1..=10 => format!("small: {}", n),
+        n @ -10..=-1 => format!("neg small: {}", n),
+        n          => format!("big: {}", n),
+    }
+}
+```
+
+#### How @ bindings work
+
+```
+n @ 1..=10
+│   └──────── pattern: does n fall in this range?
+└──────────── if yes, bind the matched value to `n` for use in the arm body
+
+Without @:                         With @:
+1..=10 => format!("small: ???")    n @ 1..=10 => format!("small: {}", n)
+          ▲ range matched but       ▲ matched AND bound — n is available
+            value is lost
+```
+
+#### Match guard syntax
+
+```
+pattern if condition => arm_body
+
+n if n > 1000 => format!("huge: {}", n)
+│  └───────── runtime check — evaluated only if pattern matches
+└──────────── pattern (here: any i32 binds to n)
+
+Guards run AFTER the pattern match.
+If the guard is false, the arm is skipped and matching continues downward.
+```
+
+#### Arms are checked top to bottom — order matters
+
+```
+match n {
+    0           → exact match checked first
+    n @ 1..=10  → range check
+    n @ -10..=-1 → range check
+    n           → wildcard — catches everything remaining (big numbers)
+}
+
+If you put the wildcard `n` FIRST, it would match everything
+and the specific arms below would never be reached.
+```
+
+#### Key ideas
+
+- `n @ pattern` — match the pattern AND bind the value to `n` simultaneously
+- Match guards (`if condition`) add extra runtime filtering on top of patterns
+- Guards do not affect exhaustiveness — the compiler still requires all cases covered by patterns alone
+- `_` discards the value; `n` binds it; `n @ range` binds AND tests
+- Arms are tried in order — first match wins
+
+---
+
+### W2-P13 — Slice Patterns (`src/slice_patterns.rs`)
+
+**[Docs: Slice Patterns](https://doc.rust-lang.org/reference/patterns.html#slice-patterns)**
+
+Match on the shape and content of a slice — exact length, fixed prefix, or prefix + captured tail.
+
+```rust
+let tokens: Vec<&str> = input.split_whitespace().collect();
+
+match tokens.as_slice() {
+    // NOTE: Exact single-element match — only fires for exactly ["quit"]
+    ["quit"] => "Goodbye".to_string(),
+
+    // NOTE: `rest @ ..` captures the tail as &[&str] — may be empty
+    ["echo", rest @ ..] => rest.join(" "),
+
+    // NOTE: Exact 3-element destructure — x and y are &str
+    ["add", x, y] => match (x.parse::<i64>(), y.parse::<i64>()) {
+        (Ok(a), Ok(b)) => (a + b).to_string(),
+        _ => "Unknown".to_string(),
+    },
+
+    // NOTE: Guard `if !msg.is_empty()` fires after pattern binds —
+    // lets "repeat 3" (no message) fall through to the wildcard
+    ["repeat", n, msg @ ..] if !msg.is_empty() => { ... }
+
+    _ => "Unknown".to_string(),
+}
+```
+
+#### Key ideas
+
+- `tokens.as_slice()` — converts `Vec<T>` to `&[T]` so slice patterns apply
+- `["a", "b", "c"]` — exact length + exact values; all three must match
+- `[head, rest @ ..]` — binds one element, captures the rest as a `&[T]` (may be empty)
+- Match guards evaluate *after* the pattern binds — use them for conditions that need bound values
+- `std::iter::repeat(x).take(n)` — produces n copies of x lazily, then collect + join
+
+---
+
+### W2-P14 — Raw Pointers (`src/raw_pointers.rs`)
+
+**[Docs: Raw Pointers](https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html#dereferencing-a-raw-pointer)**
+
+Raw pointers (`*const T`, `*mut T`) bypass the borrow checker. Safe to create, unsafe to dereference.
+
+```rust
+fn swap_values(a: &mut i32, b: &mut i32) {
+    let pa: *mut i32 = a;
+    let pb: *mut i32 = b;
+    // NOTE: unsafe required to dereference raw pointers.
+    // ptr::swap does the swap without a temp variable.
+    unsafe { std::ptr::swap(pa, pb); }
+}
+```
+
+#### Key ideas
+
+- `&mut T` → `*mut T` cast is always safe; *using* the pointer requires `unsafe`
+- `std::ptr::swap` is the idiomatic way to swap via raw pointers — no manual temp needed
+- `unsafe` block is a contract: *you* guarantee the pointers are valid and non-aliasing
+- Raw pointers don't have lifetimes or aliasing guarantees — that's your responsibility
+
+---
+
+### W2-P15 — Safe Wrapper Pattern (`src/safe_wrapper.rs`)
+
+**[Docs: Unsafe Rust](https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html)**
+
+Verify invariants once at the safe boundary, then call unsafe code confidently inside. This is how the stdlib is built.
+
+```rust
+impl SafeArray {
+    // NOTE: Safe layer — bounds check here so callers never touch unsafe.
+    fn get(&self, i: usize) -> Option<i32> {
+        if i < self.data.len() {
+            Some(unsafe { self.get_unchecked(i) }) // invariant already verified
+        } else {
+            None
+        }
+    }
+
+    // NOTE: `unsafe fn` — caller promises i is in bounds; we skip the check.
+    unsafe fn get_unchecked(&self, i: usize) -> i32 {
+        // NOTE: Rust 2024 requires explicit unsafe{} even inside an unsafe fn.
+        // as_ptr() → raw *const i32; .add(i) → pointer arithmetic, no bounds check.
+        unsafe { *self.data.as_ptr().add(i) }
+    }
+
+    // NOTE: Safe because 0..len is always valid — we verify the range, then go unchecked.
+    fn sum_all(&self) -> i32 {
+        (0..self.data.len()).map(|i| unsafe { self.get_unchecked(i) }).sum()
+    }
+}
+```
+
+#### Key ideas
+
+- `unsafe fn` signals a *precondition* to the caller — you can't call it without an `unsafe` block
+- Rust 2024: unsafe operations inside an `unsafe fn` still need their own `unsafe {}` block
+- `as_ptr().add(i)` — raw pointer arithmetic; equivalent to `&data[i]` but without the bounds check
+- The pattern: *one* safe function checks the invariant, then delegates to the `unsafe` one — don't scatter checks everywhere
+- This is exactly how `Vec::get` (safe) and `Vec::get_unchecked` (unsafe) work in the stdlib
+
+---
+
+### W2-P16 — Macros (`src/macros.rs`)
+
+**[Docs: macro_rules!](https://doc.rust-lang.org/book/ch19-06-macros.html)**
+
+`macro_rules!` matches Rust syntax patterns and expands them into code at compile time — zero runtime cost.
+
+```rust
+// NOTE: $x:expr accepts any Rust expression as input.
+// The arm body is what the macro expands TO — not a function call, a substitution.
+macro_rules! square {
+    ($x:expr) => {
+        $x * $x
+    };
+}
+
+fn compute(n: i32) -> i32 {
+    square!(n) // expands to: n * n
+}
+
+// NOTE: square!(2 + 1) expands to (2+1)*(2+1) = 9
+// The entire expression is substituted, so operator precedence is preserved.
+```
+
+#### Key ideas
+
+- `$x:expr` — metavariable; `:expr` is the *fragment specifier* (others: `:ident`, `:ty`, `:block`, `:literal`)
+- Expansion is textual substitution at compile time — no heap, no call overhead
+- Expressions are substituted whole, so `square!(2+1)` → `(2+1)*(2+1)`, not `2+1*2+1`
+- Macros must be defined before they are used in the file (unlike functions)
+
+---
+
+### W2-P17 — Multi-Arm Macros (`src/macro_arms.rs`)
+
+**[Docs: macro_rules! multiple patterns](https://doc.rust-lang.org/reference/macros-by-example.html)**
+
+Macros can have multiple arms, each matching a different token pattern — chosen at compile time, not runtime.
+
+```rust
+macro_rules! convert {
+    // NOTE: `celsius_to_f` is a literal token, not a variable — the compiler matches it exactly.
+    (celsius_to_f, $temp:expr) => {
+        $temp * 9 / 5 + 32
+    };
+    (f_to_celsius, $temp:expr) => {
+        ($temp - 32) * 5 / 9
+    };
+}
+
+convert!(celsius_to_f, 100) // → 212
+convert!(f_to_celsius, 32)  // → 0
+```
+
+#### Key ideas
+
+- Arms are tried top-to-bottom; first match wins — same as `match`
+- Keyword-like tokens (`celsius_to_f`) are matched literally — they're not identifiers or variables
+- This lets macros look like mini-DSLs with their own syntax
+- The comma between `celsius_to_f` and `$temp` is part of the pattern — it must appear in the call
+
+---
+
+### W2-P18 — Macro Repetitions (`src/macro_repeat.rs`)
+
+**[Docs: Repetitions in macro_rules!](https://doc.rust-lang.org/reference/macros-by-example.html#repetitions)**
+
+`$( ... ),*` matches zero or more comma-separated expressions — lets macros accept variadic arguments.
+
+```rust
+macro_rules! sum {
+    // NOTE: Empty arm must come first — `sum!()` would also match the repetition arm (zero times),
+    // but having an explicit arm makes the intent clear.
+    () => { 0 };
+
+    // NOTE: `0 $( + $x )*` — starts from 0 then folds in each element.
+    // Avoids needing a recursive base case.
+    ( $( $x:expr ),* ) => {
+        0 $( + $x )*
+    };
+}
+
+sum!()        // → 0
+sum!(1, 2, 3) // → 0 + 1 + 2 + 3 = 6
+```
+
+#### Key ideas
+
+- `$( $x:expr ),*` — repetition: zero or more exprs separated by commas
+- `$( + $x )*` in the expansion repeats once per captured element
+- `0 $( + $x )*` cleanly handles both empty and non-empty cases without recursion
+- Arms are tried top-to-bottom; an explicit empty arm before the repetition arm is clearer
+
+---
+
+### W2-P19 — Channels (`src/channels.rs`)
+
+**[Docs: Message Passing](https://doc.rust-lang.org/book/ch16-02-message-passing.html)**
+
+Channels pass ownership of values between threads — no shared memory, no data races.
+
+```rust
+use std::sync::mpsc;
+use std::thread;
+
+let (tx, rx) = mpsc::channel();
+
+// NOTE: `move` transfers ownership of tx and values into the thread.
+thread::spawn(move || {
+    for v in values {
+        tx.send(v * 2).unwrap();
+    }
+    // NOTE: tx drops here → channel closes → rx.iter() returns None → collect() finishes.
+});
+
+rx.iter().collect() // blocks until channel closes
+```
+
+#### Key ideas
+
+- `mpsc` = multi-producer, single-consumer — many `tx` clones allowed, one `rx`
+- `move` closures are required for threads — borrows can't cross thread boundaries
+- Dropping `tx` closes the channel; `rx.iter()` then returns `None` and collect ends
+- `rx.iter()` blocks on each item — the calling thread waits for the spawned thread to send
+- Ownership is *transferred* through the channel, so no two threads ever hold the same value
+
+---
+
+### W2-P20 — Threads & Join (`src/threads.rs`)
+
+**[Docs: Threads](https://doc.rust-lang.org/book/ch16-01-threads.html)**
+
+`thread::spawn` runs a closure concurrently; `join` waits for it and retrieves its return value.
+
+```rust
+let (left, right) = nums.split_at(mid);
+let left = left.to_vec();   // NOTE: clone into owned Vec so each thread owns its data
+let right = right.to_vec();
+
+let h1 = thread::spawn(move || left.iter().sum::<i32>());
+let h2 = thread::spawn(move || right.iter().sum::<i32>());
+
+// NOTE: join() blocks until the thread finishes; returns Result<T, _>
+h1.join().unwrap() + h2.join().unwrap()
+```
+
+#### Key ideas
+
+- `thread::spawn` requires `move` — threads need owned data, not borrows that could dangle
+- `JoinHandle<T>` carries the closure's return value; `.join().unwrap()` extracts it
+- `split_at(mid)` returns `&[T]` slices; `.to_vec()` clones them into owned `Vec<T>` for the threads
+- Join both handles before returning — not joining means the thread result is discarded
+- The compiler rejects sharing non-`Send` types across threads at compile time
+
+---
+
+### W2-P21 — Arc<Mutex<T>> (`src/arc_mutex.rs`)
+
+**[Docs: Shared State Concurrency](https://doc.rust-lang.org/book/ch16-03-shared-state.html)**
+
+`Arc<Mutex<T>>` is the standard pattern for shared mutable state across threads — `Arc` shares ownership, `Mutex` serialises access.
+
+```rust
+let counter = Arc::new(Mutex::new(0_i32));
+
+let handles: Vec<_> = (0..n).map(|_| {
+    // NOTE: Arc::clone is cheap — increments a ref count, doesn't copy the data.
+    let c = Arc::clone(&counter);
+    thread::spawn(move || {
+        // NOTE: .lock() blocks until free; MutexGuard auto-unlocks on drop.
+        *c.lock().unwrap() += 1;
+    })
+}).collect();
+
+for h in handles { h.join().unwrap(); } // wait for all threads before reading
+
+*counter.lock().unwrap() // safe: no other threads running
+```
+
+#### Key ideas
+
+- `Rc<T>` is single-threaded only; `Arc<T>` uses atomic ops so it's `Send + Sync`
+- `Arc::clone` is O(1) — it increments an atomic counter, not a deep copy
+- `MutexGuard` implements `Drop` — the lock releases automatically at end of scope
+- Join all handles *before* reading the result — unjoined threads may still be running
+- Mutex can deadlock if a thread panics while holding the lock; `.unwrap()` on `.lock()` propagates the poisoned state
+
+---
+
+### W2-P22 — Channel Pipelines (`src/pipeline_channels.rs`)
+
+**[Docs: Message Passing](https://doc.rust-lang.org/book/ch16-02-message-passing.html)**
+
+Chain channels to build concurrent data pipelines — each stage runs independently and back-pressures naturally.
+
+```
+input → [filter thread] →tx1/rx1→ [square thread] →tx2/rx2→ [collect on main]
+```
+
+```rust
+// Stage 1: filter evens
+let (tx1, rx1) = mpsc::channel::<i32>();
+thread::spawn(move || {
+    for n in input { if n % 2 == 0 { tx1.send(n).unwrap(); } }
+    // NOTE: tx1 drops here → rx1.iter() in stage 2 stops.
+});
+
+// Stage 2: square
+let (tx2, rx2) = mpsc::channel::<i32>();
+thread::spawn(move || {
+    for n in rx1.iter() { tx2.send(n * n).unwrap(); }
+    // NOTE: tx2 drops here → rx2.iter() in final stage stops.
+});
+
+// Stage 3: format (on calling thread — no extra spawn needed)
+rx2.iter().map(|n| n.to_string()).collect()
+```
+
+#### Key ideas
+
+- Each stage owns its `rx` from the previous stage and its `tx` to the next
+- Dropping `tx` closes the channel — this is how termination propagates stage-by-stage
+- The final stage doesn't need its own thread; the calling thread can drive `rx.iter()`
+- Stages run concurrently — stage 2 starts squaring as soon as stage 1 sends its first value
+- Back-pressure is implicit: a slow downstream stage blocks the upstream `send()`
+
+---
+
+### W2-P23 — State Machines with Enums (`src/state_machine.rs`)
+
+**[Docs: Enums](https://doc.rust-lang.org/book/ch06-01-defining-an-enum.html)**
+
+Enums model state machines naturally — each variant is a state, each match arm is a transition. The compiler enforces exhaustiveness so no state is ever unhandled.
+
+```rust
+fn next_state(light: &TrafficLight) -> TrafficLight {
+    match light {
+        // NOTE: Every variant must be covered — the compiler rejects partial matches.
+        TrafficLight::Red    => TrafficLight::Green,
+        TrafficLight::Green  => TrafficLight::Yellow,
+        TrafficLight::Yellow => TrafficLight::Red,
+    }
+}
+
+fn simulate(steps: usize) -> Vec<String> {
+    let mut light = TrafficLight::Red;
+    for _ in 0..steps {
+        result.push(name(&light).to_string());
+        light = next_state(&light); // NOTE: rebind to the new owned state
+    }
+}
+```
+
+#### Key ideas
+
+- Enum variants are types, not integers — the compiler tracks which states exist and rejects unhandled ones
+- `next_state` borrows the current state (`&TrafficLight`) and returns a new owned value — clean ownership
+- `&'static str` for `name` — string literals have static lifetime, no heap allocation needed
+- Exhaustive `match` means adding a new variant (e.g. `Flashing`) causes a compile error until all transitions are updated — impossible to forget a case
+
+---
+
+### W2-P24 — Expression Trees (`src/expr_tree.rs`)
+
+**[Docs: Box and Recursive Types](https://doc.rust-lang.org/book/ch15-01-box.html#enabling-recursive-types-with-boxes)**
+
+Box-wrapped enum variants enable recursive data structures — the tree's size becomes a fixed pointer width instead of infinitely recursive.
+
+```rust
+// NOTE: Without Box<Expr>, the compiler rejects this — Expr would have infinite size.
+enum Expr {
+    Num(f64),
+    Add(Box<Expr>, Box<Expr>),
+    Mul(Box<Expr>, Box<Expr>),
+    Neg(Box<Expr>),
+}
+
+fn eval(expr: &Expr) -> f64 {
+    match expr {
+        Expr::Num(n)    => *n,
+        // NOTE: l and r are &Box<Expr>; Rust auto-derefs through Box in match,
+        // so `eval(l)` works as if l were already &Expr.
+        Expr::Add(l, r) => eval(l) + eval(r),
+        Expr::Mul(l, r) => eval(l) * eval(r),
+        Expr::Neg(e)    => -eval(e),
+    }
+}
+```
+
+#### Key ideas
+
+- Recursive enum variants require `Box<T>` — it breaks the size cycle by indirecting through the heap
+- `Box<T>` is always pointer-sized regardless of `T`, so the enum variant size is fixed
+- Rust auto-derefs `Box<Expr>` in match arms — `eval(l)` works even though `l: &Box<Expr>`
+- The tree is built bottom-up with `Box::new(...)`, evaluated top-down with recursion
+- This pattern is the foundation of ASTs, interpreters, and expression evaluators
+
+---
+
+### W2-P25 — Shared Cache (`src/shared_cache.rs`)
+
+**[Docs: Shared State](https://doc.rust-lang.org/book/ch16-03-shared-state.html)**
+
+`Arc<Mutex<HashMap<K,V>>>` is the standard concurrent cache — Arc shares ownership across threads, Mutex serialises writes.
+
+```rust
+let cache: Arc<Mutex<HashMap<i32, i32>>> = Arc::new(Mutex::new(HashMap::new()));
+
+// NOTE: dedup before spawning — one thread per unique key, no redundant work.
+unique.dedup();
+
+let handles: Vec<_> = unique.into_iter().map(|x| {
+    let c = Arc::clone(&cache);
+    thread::spawn(move || {
+        // NOTE: Lock scope is minimal — insert and immediately release.
+        // Don't hold the lock across heavy computation.
+        c.lock().unwrap().insert(x, x * x);
+    })
+}).collect();
+
+for h in handles { h.join().unwrap(); }
+
+// NOTE: Single lock at the end to read all results — no contention, all threads done.
+let cache = cache.lock().unwrap();
+inputs.iter().map(|x| *cache.get(x).unwrap()).collect()
+```
+
+#### Key ideas
+
+- `Arc::clone` is cheap (atomic refcount); each thread gets its own handle to the same Mutex
+- Keep lock scope minimal — lock, write, drop; never hold it across slow work
+- `dedup()` requires a sorted slice; `sort_unstable` + `dedup` is the standard idiom
+- Join all threads before reading — guarantees all inserts are complete before the final lookup
+- Final read uses one lock acquisition for all lookups, not one per item

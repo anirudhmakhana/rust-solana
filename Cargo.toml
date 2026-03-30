@@ -28,3 +28,87 @@ path = "src/trait_objects.rs"
 [[bin]]
 name = "pipeline"
 path = "src/pipeline.rs"
+
+[[bin]]
+name = "newtype"
+path = "src/newtype.rs"
+
+[[bin]]
+name = "assoc_types"
+path = "src/assoc_types.rs"
+
+[[bin]]
+name = "operator_overload"
+path = "src/operator_overload.rs"
+
+[[bin]]
+name = "fn_pointers"
+path = "src/fn_pointers.rs"
+
+[[bin]]
+name = "returning_closures"
+path = "src/returning_closures.rs"
+
+[[bin]]
+name = "match_guards"
+path = "src/match_guards.rs"
+
+[[bin]]
+name = "slice_patterns"
+path = "src/slice_patterns.rs"
+
+[[bin]]
+name = "raw_pointers"
+path = "src/raw_pointers.rs"
+
+[[bin]]
+name = "safe_wrapper"
+path = "src/safe_wrapper.rs"
+
+[[bin]]
+name = "macros"
+path = "src/macros.rs"
+
+[[bin]]
+name = "macro_arms"
+path = "src/macro_arms.rs"
+
+[[bin]]
+name = "macro_repeat"
+path = "src/macro_repeat.rs"
+
+[[bin]]
+name = "channels"
+path = "src/channels.rs"
+
+[[bin]]
+name = "threads"
+path = "src/threads.rs"
+
+[[bin]]
+name = "arc_mutex"
+path = "src/arc_mutex.rs"
+
+[[bin]]
+name = "pipeline_channels"
+path = "src/pipeline_channels.rs"
+
+[[bin]]
+name = "state_machine"
+path = "src/state_machine.rs"
+
+[[bin]]
+name = "expr_tree"
+path = "src/expr_tree.rs"
+
+[[bin]]
+name = "shared_cache"
+path = "src/shared_cache.rs"
+
+[[bin]]
+name = "single_thread_counter"
+path = "src/single_thread_counter.rs"
+
+[[bin]]
+name = "arc_mutex_channel"
+path = "src/arc_mutex_channel.rs"
